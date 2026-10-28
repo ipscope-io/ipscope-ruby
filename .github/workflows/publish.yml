@@ -31,7 +31,7 @@ jobs:
         if: env.HAS_SECRET_KEY == ''
         env:
           HAS_SECRET_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        uses: rubygems/configure-rubygems-credentials@v1
+        uses: rubygems/configure-rubygems-credentials@v2.1.0
         continue-on-error: true
 
       - name: Publish to RubyGems
