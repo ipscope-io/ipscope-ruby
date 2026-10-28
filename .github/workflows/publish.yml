@@ -27,8 +27,17 @@ jobs:
           ruby -Ilib test/test_ipscope.rb
           gem build ipscope.gemspec
 
-      - name: Publish to RubyGems (when RUBYGEMS_API_KEY is set)
-        if: env.GEM_HOST_API_KEY != ''
+      - name: Configure RubyGems OIDC Credentials (Trusted Publishing)
+        if: env.HAS_SECRET_KEY == ''
+        env:
+          HAS_SECRET_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        uses: rubygems/configure-rubygems-credentials@v1
+        continue-on-error: true
+
+      - name: Publish to RubyGems
         env:
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: gem push ipscope-*.gem
+        run: |
+          if [ -n "$GEM_HOST_API_KEY" ] || [ -f "$HOME/.gem/credentials" ]; then
+            gem push ipscope-*.gem
+          fi
