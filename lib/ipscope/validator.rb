@@ -14,7 +14,7 @@ module IpScope
       trimmed = api_key.to_s.strip
       if trimmed.empty? || trimmed.length < 8
         raise IpScopeValidationError.new(
-          'A valid IPScope API key ("ips_live_..." or "ips_test_...") is required.',
+          'A valid IPScope API key ("<public>:<private>") is required.',
           field: "api_key"
         )
       end

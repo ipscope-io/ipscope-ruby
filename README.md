@@ -31,7 +31,7 @@ gem "ipscope"
 ```ruby
 require "ipscope"
 
-client = IpScope::Client.new(api_key: "ips_live_your_api_key_here")
+client = IpScope::Client.new(api_key: "<public>:<private>")
 
 # 1. Single IPv4 or IPv6 lookup (cached automatically in bounded LRU cache)
 ip_info = client.lookup_ip("8.8.8.8")
