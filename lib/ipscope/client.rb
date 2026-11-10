@@ -68,9 +68,9 @@ module IpScope
       end
     end
 
-    # Resolves IP intelligence for the caller's own public IP address (`GET /v1/ip`).
+    # Resolves IP intelligence for the caller's own public IP address (`GET /v1/ip/me`).
     def lookup_caller_ip(options = nil)
-      raw = @transport.request_json("GET", "/v1/ip", options: options)
+      raw = @transport.request_json("GET", "/v1/ip/me", options: options)
       record = IpLookupResponse.from_h(raw[:data])
       @cache.set(record.ip, record) if !(options&.bypass_cache) && !record.ip.empty?
       record
@@ -85,6 +85,7 @@ module IpScope
 
       resolved_map = {}
       missing_ips = []
+      dataset_version = ""
 
       if !bypass_cache && @cache.enabled?
         unique_ips.each do |ip|
@@ -107,6 +108,7 @@ module IpScope
           options: options
         )
         batch_resp = BatchLookupResponse.from_h(raw[:data])
+        dataset_version = batch_resp.dataset_version
 
         batch_resp.results.each_with_index do |record, idx|
           requested_key = missing_ips[idx] || record.ip
@@ -125,7 +127,8 @@ module IpScope
 
       BatchLookupResponse.new(
         count: ordered_results.length,
-        results: ordered_results
+        results: ordered_results,
+        dataset_version: dataset_version.empty? ? first_dataset_version(ordered_results) : dataset_version
       )
     end
 
@@ -138,7 +141,8 @@ module IpScope
       end
       BatchLookupResponse.new(
         count: merged.length,
-        results: merged
+        results: merged,
+        dataset_version: first_dataset_version(merged)
       )
     end
 
@@ -182,18 +186,18 @@ module IpScope
       end
     end
 
-    # Looks up BGP/CIDR network prefix intelligence (`GET /v1/network/{address}/{prefixLength}`).
+    # Looks up BGP/CIDR network prefix intelligence (`GET /v1/networks/{address}/{prefixLength}`).
     def lookup_network(cidr, options = nil)
       parsed = Validator.validate_cidr_prefix(cidr)
       encoded_addr = URI.encode_www_form_component(parsed[:address])
-      path = "/v1/network/#{encoded_addr}/#{parsed[:prefix_length]}"
+      path = "/v1/networks/#{encoded_addr}/#{parsed[:prefix_length]}"
       raw = @transport.request_json("GET", path, options: options)
       NetworkPrefixLookupResponse.from_h(raw[:data])
     end
 
-    # Retrieves active IP intelligence dataset snapshots metadata (`GET /v1/datasets/metadata`).
+    # Retrieves active and historical dataset snapshot metadata (`GET /v1/metadata/datasets`).
     def get_datasets_metadata(options = nil)
-      raw = @transport.request_json("GET", "/v1/datasets/metadata", options: options)
+      raw = @transport.request_json("GET", "/v1/metadata/datasets", options: options)
       DatasetsMetadataResponse.from_h(raw[:data])
     end
 
@@ -203,19 +207,20 @@ module IpScope
         raise IpScopeValidationError.new("Expected FeedbackSubmissionInput instance.", field: "feedback")
       end
 
-      trimmed = feedback.ip_or_cidr.strip
+      trimmed = feedback.prefix_or_ip.strip
       if trimmed.empty?
-        raise IpScopeValidationError.new("ip_or_cidr must not be empty.", field: "ip_or_cidr")
+        raise IpScopeValidationError.new("prefix_or_ip must not be empty.", field: "prefix_or_ip")
       end
 
       normalized = if trimmed.include?("/")
                      Validator.validate_cidr_prefix(trimmed)[:canonical_cidr]
                    else
-                     Validator.validate_ip_address(trimmed, "ip_or_cidr")
+                     Validator.validate_ip_address(trimmed, "prefix_or_ip")
                    end
+      validate_feedback_fields(feedback)
 
       payload = feedback.to_h
-      payload["ip_or_cidr"] = normalized
+      payload["prefix_or_ip"] = normalized
 
       raw = @transport.request_json("POST", "/v1/feedback", json_body: payload, options: options)
       FeedbackSubmissionResponse.from_h(raw[:data])
@@ -227,7 +232,7 @@ module IpScope
       ServiceStatusResponse.from_h(raw[:data])
     end
 
-    # Returns the most recent rate-limit metadata observed from `x-ratelimit-*` headers.
+    # Returns the most recent rate-limit metadata observed from `X-RateLimit-*` headers.
     def last_rate_limit
       @transport.last_rate_limit
     end
@@ -243,6 +248,30 @@ module IpScope
     end
 
     private
+
+    def first_dataset_version(records)
+      found = records.find { |r| !r.dataset_version.empty? }
+      found ? found.dataset_version : ""
+    end
+
+    def validate_feedback_fields(feedback)
+      unless FeedbackSubmissionInput::ROLES.include?(feedback.role)
+        raise IpScopeValidationError.new(
+          "role must be one of: #{FeedbackSubmissionInput::ROLES.join(', ')}.", field: "role"
+        )
+      end
+      unless FeedbackSubmissionInput::ISSUE_TYPES.include?(feedback.issue_type)
+        raise IpScopeValidationError.new(
+          "issue_type must be one of: #{FeedbackSubmissionInput::ISSUE_TYPES.join(', ')}.", field: "issue_type"
+        )
+      end
+      if feedback.evidence_url && !%r{\Ahttps?://[^\s/]+\S*\z}i.match?(feedback.evidence_url)
+        raise IpScopeValidationError.new("evidence_url must be an absolute http(s) URL.", field: "evidence_url")
+      end
+      if feedback.contact_email && !/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/.match?(feedback.contact_email)
+        raise IpScopeValidationError.new("contact_email must be a valid email address.", field: "contact_email")
+      end
+    end
 
     def fetch_and_cache_single_ip(canonical_ip, bypass_cache, options)
       encoded = URI.encode_www_form_component(canonical_ip)

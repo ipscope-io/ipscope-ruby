@@ -114,19 +114,18 @@ module IpScope
     def self.extract_rate_limit_metadata(headers)
       limit = parse_header_int(headers["x-ratelimit-limit"])
       remaining = parse_header_int(headers["x-ratelimit-remaining"])
-      reset = parse_header_int(headers["x-ratelimit-reset"])
-      credits = parse_header_int(headers["x-ratelimit-credits-remaining"])
-      tier_raw = headers["x-ratelimit-tier"].to_s.strip
-      tier = tier_raw.empty? ? nil : tier_raw
+      # `X-RateLimit-Reset` is the number of seconds until the window resets.
+      reset_after = parse_header_int(headers["x-ratelimit-reset"])
+      scope_raw = headers["x-ratelimit-scope"].to_s.strip
+      scope = scope_raw.empty? ? nil : scope_raw
 
-      return nil if limit.nil? && remaining.nil? && reset.nil? && credits.nil? && tier.nil?
+      return nil if limit.nil? && remaining.nil? && reset_after.nil? && scope.nil?
 
       RateLimitMetadata.new(
         limit: limit,
         remaining: remaining,
-        reset_epoch_seconds: reset,
-        credits_remaining: credits,
-        plan_tier: tier
+        reset_after_seconds: reset_after,
+        scope: scope
       )
     end
 

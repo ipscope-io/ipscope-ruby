@@ -1,509 +1,697 @@
 # frozen_string_literal: true
 
 module IpScope
-  # Geographic location intelligence block.
+  # Lenient JSON value casting shared by the response models.
+  # @api private
+  module ModelCast
+    module_function
+
+    def as_hash(raw)
+      raw.is_a?(Hash) ? raw : {}
+    end
+
+    def obj(raw, key)
+      v = raw[key]
+      v.is_a?(Hash) ? v : nil
+    end
+
+    def str(raw, key)
+      v = raw[key]
+      return nil if v.nil? || v.is_a?(Hash) || v.is_a?(Array)
+
+      v.to_s.freeze
+    end
+
+    def int(raw, key)
+      v = raw[key]
+      v.is_a?(Numeric) ? v.to_i : nil
+    end
+
+    def float(raw, key)
+      v = raw[key]
+      v.is_a?(Numeric) ? v.to_f : nil
+    end
+
+    # Numeric value kept as sent: an Integer stays Integer, a fraction stays Float.
+    def number(raw, key)
+      v = raw[key]
+      v.is_a?(Numeric) ? v : nil
+    end
+
+    # Tri-state boolean: true, false, or nil when the API abstains or omits the field.
+    def bool(raw, key)
+      v = raw[key]
+      v == true || v == false ? v : nil
+    end
+
+    def str_list(raw, key)
+      v = raw[key]
+      return [].freeze unless v.is_a?(Array)
+
+      v.reject { |item| item.is_a?(Hash) || item.is_a?(Array) || item.nil? }.map { |item| item.to_s.freeze }.freeze
+    end
+
+    # Prints a deprecation warning pointing at the caller (silenced by `ruby -W0`, i.e. `$VERBOSE = nil`).
+    def deprecated(klass, old, new_name)
+      return if $VERBOSE.nil?
+
+      warn("[ipscope] #{klass}##{old} is deprecated since 1.1.0; use ##{new_name}.", uplevel: 2)
+    end
+  end
+
+  # Geographic block (`geo`) of a lookup response.
   class GeoBlock
-    attr_reader :country_code, :country_name, :region_code, :region_name,
-                :city, :postal_code, :latitude, :longitude, :timezone,
-                :accuracy_radius_km
+    attr_reader :country_code, :subdivision, :city, :postal_code, :latitude, :longitude,
+                :timezone, :location_type, :confidence, :accuracy_radius_km,
+                :declared_country_code, :physical_country_code, :is_virtual_location
 
     def initialize(
       country_code: nil,
-      country_name: nil,
-      region_code: nil,
-      region_name: nil,
+      subdivision: nil,
       city: nil,
       postal_code: nil,
       latitude: nil,
       longitude: nil,
       timezone: nil,
-      accuracy_radius_km: nil
+      location_type: "unknown",
+      confidence: 0.0,
+      accuracy_radius_km: nil,
+      declared_country_code: nil,
+      physical_country_code: nil,
+      is_virtual_location: nil
     )
-      @country_code = country_code&.to_s&.freeze
-      @country_name = country_name&.to_s&.freeze
-      @region_code = region_code&.to_s&.freeze
-      @region_name = region_name&.to_s&.freeze
-      @city = city&.to_s&.freeze
-      @postal_code = postal_code&.to_s&.freeze
-      @latitude = latitude.nil? ? nil : latitude.to_f
-      @longitude = longitude.nil? ? nil : longitude.to_f
-      @timezone = timezone&.to_s&.freeze
-      @accuracy_radius_km = accuracy_radius_km.nil? ? nil : accuracy_radius_km.to_i
+      @country_code = country_code
+      @subdivision = subdivision
+      @city = city
+      @postal_code = postal_code
+      @latitude = latitude
+      @longitude = longitude
+      @timezone = timezone
+      @location_type = location_type
+      @confidence = confidence
+      @accuracy_radius_km = accuracy_radius_km
+      @declared_country_code = declared_country_code
+      @physical_country_code = physical_country_code
+      @is_virtual_location = is_virtual_location
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        country_code: h["country_code"],
-        country_name: h["country_name"],
-        region_code: h["region_code"],
-        region_name: h["region_name"],
-        city: h["city"],
-        postal_code: h["postal_code"],
-        latitude: h["latitude"],
-        longitude: h["longitude"],
-        timezone: h["timezone"],
-        accuracy_radius_km: h["accuracy_radius_km"]
+        country_code: ModelCast.str(h, "country_code"),
+        subdivision: ModelCast.str(h, "subdivision"),
+        city: ModelCast.str(h, "city"),
+        postal_code: ModelCast.str(h, "postal_code"),
+        latitude: ModelCast.float(h, "latitude"),
+        longitude: ModelCast.float(h, "longitude"),
+        timezone: ModelCast.str(h, "timezone"),
+        location_type: ModelCast.str(h, "location_type") || "unknown",
+        confidence: ModelCast.float(h, "confidence") || 0.0,
+        accuracy_radius_km: ModelCast.float(h, "accuracy_radius_km"),
+        declared_country_code: ModelCast.str(h, "declared_country_code"),
+        physical_country_code: ModelCast.str(h, "physical_country_code"),
+        is_virtual_location: ModelCast.bool(h, "is_virtual_location")
       )
     end
   end
 
-  # Autonomous System (ASN) and BGP prefix block.
+  # Autonomous System block (`network`) of a lookup response.
   class NetworkBlock
-    attr_reader :asn, :asn_name, :org, :isp, :connection_type, :bgp_prefix, :rir
+    attr_reader :asn, :organization
 
-    def initialize(
-      asn: nil,
-      asn_name: nil,
-      org: nil,
-      isp: nil,
-      connection_type: nil,
-      bgp_prefix: nil,
-      rir: nil
-    )
-      @asn = asn.nil? ? nil : asn.to_i
-      @asn_name = asn_name&.to_s&.freeze
-      @org = org&.to_s&.freeze
-      @isp = isp&.to_s&.freeze
-      @connection_type = connection_type&.to_s&.freeze
-      @bgp_prefix = bgp_prefix&.to_s&.freeze
-      @rir = rir&.to_s&.freeze
+    def initialize(asn: nil, organization: nil)
+      @asn = asn
+      @organization = organization
       freeze
     end
 
+    # @deprecated since 1.1.0; use {#organization}.
+    def org
+      ModelCast.deprecated(self.class, "org", "organization")
+      @organization
+    end
+
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
-      new(
-        asn: h["asn"],
-        asn_name: h["asn_name"],
-        org: h["org"],
-        isp: h["isp"],
-        connection_type: h["connection_type"],
-        bgp_prefix: h["bgp_prefix"],
-        rir: h["rir"]
-      )
+      h = ModelCast.as_hash(raw)
+      new(asn: ModelCast.int(h, "asn"), organization: ModelCast.str(h, "organization"))
     end
   end
 
-  # Anonymity, proxy, VPN, Tor, and threat intelligence block.
+  # Security and anonymity block (`security`) of a lookup response.
+  # Booleans are nil when the API has insufficient evidence (never a silent false).
   class SecurityBlock
-    attr_reader :is_vpn, :is_proxy, :is_tor, :is_datacenter, :is_relay,
-                :threat_level, :threat_types
+    attr_reader :is_vpn, :is_hosting, :is_tor_exit, :is_proxy, :is_relay,
+                :anonymizer_type, :confidence, :reason_codes
 
     def initialize(
-      is_vpn: false,
-      is_proxy: false,
-      is_tor: false,
-      is_datacenter: false,
-      is_relay: false,
-      threat_level: "low",
-      threat_types: []
+      is_vpn: nil,
+      is_hosting: nil,
+      is_tor_exit: nil,
+      is_proxy: nil,
+      is_relay: nil,
+      anonymizer_type: "unknown",
+      confidence: 0.0,
+      reason_codes: []
     )
-      @is_vpn = !!is_vpn
-      @is_proxy = !!is_proxy
-      @is_tor = !!is_tor
-      @is_datacenter = !!is_datacenter
-      @is_relay = !!is_relay
-      @threat_level = (threat_level || "low").to_s.freeze
-      @threat_types = Array(threat_types).map { |t| t.to_s.freeze }.freeze
+      @is_vpn = is_vpn
+      @is_hosting = is_hosting
+      @is_tor_exit = is_tor_exit
+      @is_proxy = is_proxy
+      @is_relay = is_relay
+      @anonymizer_type = anonymizer_type
+      @confidence = confidence
+      @reason_codes = Array(reason_codes).freeze
       freeze
     end
 
+    # @deprecated since 1.1.0; use {#is_tor_exit}.
+    def is_tor
+      ModelCast.deprecated(self.class, "is_tor", "is_tor_exit")
+      @is_tor_exit
+    end
+
+    # @deprecated since 1.1.0; use {#is_hosting}.
+    def is_datacenter
+      ModelCast.deprecated(self.class, "is_datacenter", "is_hosting")
+      @is_hosting
+    end
+
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        is_vpn: h["is_vpn"],
-        is_proxy: h["is_proxy"],
-        is_tor: h["is_tor"],
-        is_datacenter: h["is_datacenter"],
-        is_relay: h["is_relay"],
-        threat_level: h["threat_level"] || "low",
-        threat_types: h["threat_types"].is_a?(Array) ? h["threat_types"] : []
+        is_vpn: ModelCast.bool(h, "is_vpn"),
+        is_hosting: ModelCast.bool(h, "is_hosting"),
+        is_tor_exit: ModelCast.bool(h, "is_tor_exit"),
+        is_proxy: ModelCast.bool(h, "is_proxy"),
+        is_relay: ModelCast.bool(h, "is_relay"),
+        anonymizer_type: ModelCast.str(h, "anonymizer_type") || "unknown",
+        confidence: ModelCast.float(h, "confidence") || 0.0,
+        reason_codes: ModelCast.str_list(h, "reason_codes")
       )
     end
   end
 
-  # Detailed connection and carrier classification block.
+  # Connection context block (`connection`), present only when the `connection` field family is licensed.
   class ConnectionBlock
-    attr_reader :usage_type, :company_type, :carrier_name, :mcc, :mnc,
-                :domain, :route, :allocated_date, :registry_status
+    attr_reader :connection_type, :is_residential, :is_mobile, :is_business, :is_hosting
 
-    def initialize(
-      usage_type: nil,
-      company_type: nil,
-      carrier_name: nil,
-      mcc: nil,
-      mnc: nil,
-      domain: nil,
-      route: nil,
-      allocated_date: nil,
-      registry_status: nil
-    )
-      @usage_type = usage_type&.to_s&.freeze
-      @company_type = company_type&.to_s&.freeze
-      @carrier_name = carrier_name&.to_s&.freeze
-      @mcc = mcc&.to_s&.freeze
-      @mnc = mnc&.to_s&.freeze
-      @domain = domain&.to_s&.freeze
-      @route = route&.to_s&.freeze
-      @allocated_date = allocated_date&.to_s&.freeze
-      @registry_status = registry_status&.to_s&.freeze
+    def initialize(connection_type: "unknown", is_residential: nil, is_mobile: nil, is_business: nil, is_hosting: nil)
+      @connection_type = connection_type
+      @is_residential = is_residential
+      @is_mobile = is_mobile
+      @is_business = is_business
+      @is_hosting = is_hosting
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        usage_type: h["usage_type"],
-        company_type: h["company_type"],
-        carrier_name: h["carrier_name"],
-        mcc: h["mcc"],
-        mnc: h["mnc"],
-        domain: h["domain"],
-        route: h["route"],
-        allocated_date: h["allocated_date"],
-        registry_status: h["registry_status"]
+        connection_type: ModelCast.str(h, "connection_type") || "unknown",
+        is_residential: ModelCast.bool(h, "is_residential"),
+        is_mobile: ModelCast.bool(h, "is_mobile"),
+        is_business: ModelCast.bool(h, "is_business"),
+        is_hosting: ModelCast.bool(h, "is_hosting")
       )
     end
   end
 
-  # Extended threat scoring and provider attribution block.
+  # Security extensions block (`security_extensions`), present only when that field family is licensed.
   class SecurityExtensionsBlock
-    attr_reader :vpn_provider, :proxy_type, :threat_score, :is_abuser, :is_bot, :is_bogon
+    # Abuse reputation / velocity score, or nil. The API contract defines an Integer 0..100
+    # (higher is worse); API releases before that change serve a Float in 0.0..1.0. The value
+    # is passed through unchanged, so check which form you got.
+    attr_reader :abuse_velocity_score
+    attr_reader :is_known_scanner, :observation_recency_hours
 
-    def initialize(
-      vpn_provider: nil,
-      proxy_type: nil,
-      threat_score: nil,
-      is_abuser: false,
-      is_bot: false,
-      is_bogon: false
-    )
-      @vpn_provider = vpn_provider&.to_s&.freeze
-      @proxy_type = proxy_type&.to_s&.freeze
-      @threat_score = threat_score.nil? ? nil : threat_score.to_i
-      @is_abuser = !!is_abuser
-      @is_bot = !!is_bot
-      @is_bogon = !!is_bogon
+    def initialize(abuse_velocity_score: nil, is_known_scanner: nil, observation_recency_hours: nil)
+      @abuse_velocity_score = abuse_velocity_score
+      @is_known_scanner = is_known_scanner
+      @observation_recency_hours = observation_recency_hours
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        vpn_provider: h["vpn_provider"],
-        proxy_type: h["proxy_type"],
-        threat_score: h["threat_score"],
-        is_abuser: h["is_abuser"],
-        is_bot: h["is_bot"],
-        is_bogon: h["is_bogon"]
+        abuse_velocity_score: ModelCast.number(h, "abuse_velocity_score"),
+        is_known_scanner: ModelCast.bool(h, "is_known_scanner"),
+        observation_recency_hours: ModelCast.float(h, "observation_recency_hours")
       )
     end
   end
 
-  # Canonical IP intelligence response returned by `/v1/ip` and `/v1/ip/{ip}`.
+  # Canonical IP lookup response (`GET /v1/ip/{ip}`, `GET /v1/ip/me`).
   class IpLookupResponse
-    attr_reader :ip, :version, :is_bogon, :bogon_type, :geo, :network,
-                :security, :connection, :security_extensions, :updated_at
+    attr_reader :ip, :ip_version, :matched_network, :geo, :network, :security,
+                :connection, :security_extensions, :dataset_version, :updated_at
 
     def initialize(
       ip:,
-      version:,
-      is_bogon:,
-      bogon_type:,
-      geo:,
-      network:,
-      security:,
-      connection: nil,
-      security_extensions: nil,
-      updated_at: ""
-    )
-      @ip = ip.to_s.freeze
-      @version = version.to_i
-      @is_bogon = !!is_bogon
-      @bogon_type = bogon_type&.to_s&.freeze
-      @geo = geo
-      @network = network
-      @security = security
-      @connection = connection
-      @security_extensions = security_extensions
-      @updated_at = updated_at.to_s.freeze
-      freeze
-    end
-
-    def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
-      new(
-        ip: h["ip"] || "",
-        version: h["version"] || 4,
-        is_bogon: h["is_bogon"] || false,
-        bogon_type: h["bogon_type"],
-        geo: GeoBlock.from_h(h["geo"]),
-        network: NetworkBlock.from_h(h["network"]),
-        security: SecurityBlock.from_h(h["security"]),
-        connection: h["connection"].is_a?(Hash) ? ConnectionBlock.from_h(h["connection"]) : nil,
-        security_extensions: h["security_extensions"].is_a?(Hash) ? SecurityExtensionsBlock.from_h(h["security_extensions"]) : nil,
-        updated_at: h["updated_at"] || ""
-      )
-    end
-  end
-
-  # Batch IP lookup response returned by `POST /v1/ip/batch`.
-  class BatchLookupResponse
-    attr_reader :count, :results
-
-    def initialize(count:, results:)
-      @results = Array(results).freeze
-      @count = count ? count.to_i : @results.length
-      freeze
-    end
-
-    def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
-      raw_list = h["results"].is_a?(Array) ? h["results"] : []
-      records = raw_list.select { |item| item.is_a?(Hash) }.map { |item| IpLookupResponse.from_h(item) }
-      new(
-        count: h["count"] || records.length,
-        results: records
-      )
-    end
-  end
-
-  # Canonical BGP/CIDR prefix intelligence record.
-  class CanonicalNetworkPrefixRecord
-    attr_reader :network_cidr, :ip_version, :geo, :network, :security,
-                :connection, :security_extensions, :updated_at
-
-    def initialize(
-      network_cidr:,
       ip_version:,
       geo:,
       network:,
       security:,
+      matched_network: nil,
       connection: nil,
       security_extensions: nil,
-      updated_at: ""
+      dataset_version: "",
+      updated_at: nil
     )
-      @network_cidr = network_cidr.to_s.freeze
+      @ip = ip.to_s.freeze
       @ip_version = ip_version.to_i
+      @matched_network = matched_network
       @geo = geo
       @network = network
       @security = security
       @connection = connection
       @security_extensions = security_extensions
-      @updated_at = updated_at.to_s.freeze
+      @dataset_version = dataset_version.to_s.freeze
+      @updated_at = updated_at
       freeze
     end
 
+    # @deprecated since 1.1.0; use {#ip_version}.
+    def version
+      ModelCast.deprecated(self.class, "version", "ip_version")
+      @ip_version
+    end
+
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
+      ip = ModelCast.str(h, "ip") || ""
+      connection = ModelCast.obj(h, "connection")
+      extensions = ModelCast.obj(h, "security_extensions")
       new(
-        network_cidr: h["network_cidr"] || "",
-        ip_version: h["ip_version"] || 4,
+        ip: ip,
+        ip_version: ModelCast.int(h, "ip_version") || (ip.include?(":") ? 6 : 4),
+        matched_network: ModelCast.str(h, "matched_network"),
         geo: GeoBlock.from_h(h["geo"]),
         network: NetworkBlock.from_h(h["network"]),
         security: SecurityBlock.from_h(h["security"]),
-        connection: h["connection"].is_a?(Hash) ? ConnectionBlock.from_h(h["connection"]) : nil,
-        security_extensions: h["security_extensions"].is_a?(Hash) ? SecurityExtensionsBlock.from_h(h["security_extensions"]) : nil,
-        updated_at: h["updated_at"] || ""
+        connection: connection ? ConnectionBlock.from_h(connection) : nil,
+        security_extensions: extensions ? SecurityExtensionsBlock.from_h(extensions) : nil,
+        dataset_version: ModelCast.str(h, "dataset_version") || "",
+        updated_at: ModelCast.str(h, "updated_at")
       )
     end
   end
 
-  # Network CIDR lookup response returned by `GET /v1/network/{address}/{prefixLength}`.
+  # Batch IP lookup response (`POST /v1/ip/batch`).
+  class BatchLookupResponse
+    attr_reader :count, :results, :dataset_version
+
+    def initialize(count:, results:, dataset_version: "")
+      @results = Array(results).freeze
+      @count = count ? count.to_i : @results.length
+      @dataset_version = dataset_version.to_s.freeze
+      freeze
+    end
+
+    def self.from_h(raw)
+      h = ModelCast.as_hash(raw)
+      raw_list = h["results"].is_a?(Array) ? h["results"] : []
+      records = raw_list.select { |item| item.is_a?(Hash) }.map { |item| IpLookupResponse.from_h(item) }
+      new(
+        count: ModelCast.int(h, "count") || records.length,
+        results: records,
+        dataset_version: ModelCast.str(h, "dataset_version") || ""
+      )
+    end
+  end
+
+  # A structured geographic assertion inside a canonical network record (camelCase on the wire).
+  class LocationAssertion
+    attr_reader :country_code, :country_name, :subdivision, :city, :latitude, :longitude,
+                :accuracy_radius_km, :timezone
+
+    def initialize(country_code: nil, country_name: nil, subdivision: nil, city: nil, latitude: nil,
+                   longitude: nil, accuracy_radius_km: nil, timezone: nil)
+      @country_code = country_code
+      @country_name = country_name
+      @subdivision = subdivision
+      @city = city
+      @latitude = latitude
+      @longitude = longitude
+      @accuracy_radius_km = accuracy_radius_km
+      @timezone = timezone
+      freeze
+    end
+
+    def self.from_h(raw)
+      return nil unless raw.is_a?(Hash)
+
+      new(
+        country_code: ModelCast.str(raw, "countryCode"),
+        country_name: ModelCast.str(raw, "countryName"),
+        subdivision: ModelCast.str(raw, "subdivision"),
+        city: ModelCast.str(raw, "city"),
+        latitude: ModelCast.float(raw, "latitude"),
+        longitude: ModelCast.float(raw, "longitude"),
+        accuracy_radius_km: ModelCast.float(raw, "accuracyRadiusKm"),
+        timezone: ModelCast.str(raw, "timezone")
+      )
+    end
+  end
+
+  # Declared, inferred-physical, and client locations kept separate in a canonical record.
+  class SeparatedLocations
+    attr_reader :declared_location, :inferred_physical_location, :client_location
+
+    def initialize(declared_location: nil, inferred_physical_location: nil, client_location: nil)
+      @declared_location = declared_location
+      @inferred_physical_location = inferred_physical_location
+      @client_location = client_location
+      freeze
+    end
+
+    def self.from_h(raw)
+      h = ModelCast.as_hash(raw)
+      new(
+        declared_location: LocationAssertion.from_h(h["declaredLocation"]),
+        inferred_physical_location: LocationAssertion.from_h(h["inferredPhysicalLocation"]),
+        client_location: LocationAssertion.from_h(h["clientLocation"])
+      )
+    end
+  end
+
+  # Canonical network record stored in the serving snapshot (`record` of a network lookup).
+  # The API serves this object with camelCase keys; attributes here are snake_case.
+  class CanonicalNetworkPrefixRecord
+    FIELDS = {
+      family: ["family", :int],
+      prefix: ["prefix", :str],
+      asn: ["asn", :int],
+      organization: ["organization", :str],
+      country_code: ["countryCode", :str],
+      subdivision: ["subdivision", :str],
+      city: ["city", :str],
+      postal_code: ["postalCode", :str],
+      latitude: ["latitude", :float],
+      longitude: ["longitude", :float],
+      timezone: ["timezone", :str],
+      location_type: ["locationType", :str],
+      geo_confidence: ["geoConfidence", :float],
+      accuracy_radius_km: ["accuracyRadiusKm", :float],
+      is_virtual_location: ["isVirtualLocation", :bool],
+      connection_type: ["connectionType", :str],
+      is_hosting: ["isHosting", :bool],
+      is_vpn: ["isVpn", :bool],
+      is_tor_exit: ["isTorExit", :bool],
+      is_proxy: ["isProxy", :bool],
+      anonymizer_type: ["anonymizerType", :str],
+      security_confidence: ["securityConfidence", :float],
+      abuse_velocity_score: ["abuseVelocityScore", :number],
+      is_known_scanner: ["isKnownScanner", :bool],
+      reason_codes: ["reasonCodes", :str_list],
+      source_ids: ["sourceIds", :str_list],
+      license_policy_ids: ["licensePolicyIds", :str_list],
+      updated_at: ["updatedAt", :str]
+    }.freeze
+
+    attr_reader(*FIELDS.keys)
+    attr_reader :locations
+
+    def initialize(locations: SeparatedLocations.new, **attrs)
+      unknown = attrs.keys - FIELDS.keys
+      raise ArgumentError, "unknown keywords: #{unknown.join(', ')}" unless unknown.empty?
+
+      FIELDS.each_key { |name| instance_variable_set("@#{name}", attrs[name]) }
+      @prefix ||= ""
+      @family ||= @prefix.include?(":") ? 6 : 4
+      @location_type ||= "unknown"
+      @anonymizer_type ||= "unknown"
+      @geo_confidence ||= 0.0
+      @security_confidence ||= 0.0
+      @reason_codes ||= [].freeze
+      @source_ids ||= [].freeze
+      @license_policy_ids ||= [].freeze
+      @locations = locations
+      freeze
+    end
+
+    def self.from_h(raw)
+      h = ModelCast.as_hash(raw)
+      attrs = FIELDS.each_with_object({}) do |(name, (key, type)), acc|
+        acc[name] = ModelCast.public_send(type, h, key)
+      end
+      new(locations: SeparatedLocations.from_h(h["locations"]), **attrs)
+    end
+  end
+
+  # Network CIDR lookup response (`GET /v1/networks/{address}/{prefixLength}`).
   class NetworkPrefixLookupResponse
-    attr_reader :requested_cidr, :exact_match, :enclosing_prefix,
-                :overlapping_prefixes, :total_matches
+    attr_reader :queried_cidr, :matched_network, :family, :bgp_prefix_length,
+                :dataset_version, :record, :lookup
 
-    def initialize(
-      requested_cidr:,
-      exact_match:,
-      enclosing_prefix:,
-      overlapping_prefixes:,
-      total_matches:
-    )
-      @requested_cidr = requested_cidr.to_s.freeze
-      @exact_match = exact_match
-      @enclosing_prefix = enclosing_prefix
-      @overlapping_prefixes = Array(overlapping_prefixes).freeze
-      @total_matches = total_matches.to_i
+    def initialize(queried_cidr:, matched_network:, family:, bgp_prefix_length:, dataset_version:,
+                   record: nil, lookup: nil)
+      @queried_cidr = queried_cidr.to_s.freeze
+      @matched_network = matched_network.to_s.freeze
+      @family = family.to_i
+      @bgp_prefix_length = bgp_prefix_length.to_i
+      @dataset_version = dataset_version.to_s.freeze
+      @record = record
+      @lookup = lookup
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
-      overlaps = (h["overlapping_prefixes"].is_a?(Array) ? h["overlapping_prefixes"] : [])
-                 .select { |item| item.is_a?(Hash) }
-                 .map { |item| CanonicalNetworkPrefixRecord.from_h(item) }
+      h = ModelCast.as_hash(raw)
+      queried = ModelCast.str(h, "queried_cidr") || ""
+      matched = ModelCast.str(h, "matched_network") || queried
+      record = ModelCast.obj(h, "record")
+      lookup = ModelCast.obj(h, "lookup")
       new(
-        requested_cidr: h["requested_cidr"] || "",
-        exact_match: h["exact_match"].is_a?(Hash) ? CanonicalNetworkPrefixRecord.from_h(h["exact_match"]) : nil,
-        enclosing_prefix: h["enclosing_prefix"].is_a?(Hash) ? CanonicalNetworkPrefixRecord.from_h(h["enclosing_prefix"]) : nil,
-        overlapping_prefixes: overlaps,
-        total_matches: h["total_matches"] || overlaps.length
+        queried_cidr: queried,
+        matched_network: matched,
+        family: ModelCast.int(h, "family") || (queried.include?(":") ? 6 : 4),
+        bgp_prefix_length: ModelCast.int(h, "bgp_prefix_length") || matched.split("/")[1].to_i,
+        dataset_version: ModelCast.str(h, "dataset_version") || "",
+        record: record ? CanonicalNetworkPrefixRecord.from_h(record) : nil,
+        lookup: lookup ? IpLookupResponse.from_h(lookup) : nil
       )
     end
   end
 
-  # Snapshot metadata for a single IP intelligence dataset source.
+  # Summary of one loaded dataset snapshot.
   class DatasetSnapshotSummary
-    attr_reader :source, :version_tag, :checksum_sha256, :record_count,
-                :activated_at, :created_at
+    attr_reader :snapshot_version, :digest, :ruleset_version, :published_at,
+                :ipv4_prefix_count, :ipv6_prefix_count
 
-    def initialize(
-      source:,
-      version_tag:,
-      checksum_sha256:,
-      record_count:,
-      activated_at:,
-      created_at:
-    )
-      @source = source.to_s.freeze
-      @version_tag = version_tag.to_s.freeze
-      @checksum_sha256 = checksum_sha256.to_s.freeze
-      @record_count = record_count.to_i
-      @activated_at = activated_at&.to_s&.freeze
-      @created_at = created_at.to_s.freeze
+    def initialize(snapshot_version:, digest:, ruleset_version:, published_at:,
+                   ipv4_prefix_count:, ipv6_prefix_count:)
+      @snapshot_version = snapshot_version.to_s.freeze
+      @digest = digest.to_s.freeze
+      @ruleset_version = ruleset_version.to_s.freeze
+      @published_at = published_at.to_s.freeze
+      @ipv4_prefix_count = ipv4_prefix_count.to_i
+      @ipv6_prefix_count = ipv6_prefix_count.to_i
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        source: h["source"] || "",
-        version_tag: h["version_tag"] || "",
-        checksum_sha256: h["checksum_sha256"] || "",
-        record_count: h["record_count"] || 0,
-        activated_at: h["activated_at"],
-        created_at: h["created_at"] || ""
+        snapshot_version: ModelCast.str(h, "snapshot_version") || "",
+        digest: ModelCast.str(h, "digest") || "",
+        ruleset_version: ModelCast.str(h, "ruleset_version") || "",
+        published_at: ModelCast.str(h, "published_at") || "",
+        ipv4_prefix_count: ModelCast.int(h, "ipv4_prefix_count") || 0,
+        ipv6_prefix_count: ModelCast.int(h, "ipv6_prefix_count") || 0
       )
     end
   end
 
-  # Active dataset snapshots metadata returned by `GET /v1/datasets/metadata`.
+  # Dataset snapshots metadata (`GET /v1/metadata/datasets`).
   class DatasetsMetadataResponse
-    attr_reader :count, :active_datasets
+    attr_reader :active_version, :previous_version, :snapshots
 
-    def initialize(count:, active_datasets:)
-      @active_datasets = Array(active_datasets).freeze
-      @count = count ? count.to_i : @active_datasets.length
+    def initialize(active_version:, previous_version:, snapshots:)
+      @active_version = active_version.to_s.freeze
+      @previous_version = previous_version
+      @snapshots = Array(snapshots).freeze
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
-      datasets = (h["active_datasets"].is_a?(Array) ? h["active_datasets"] : [])
-                 .select { |item| item.is_a?(Hash) }
-                 .map { |item| DatasetSnapshotSummary.from_h(item) }
+      h = ModelCast.as_hash(raw)
+      snapshots = (h["snapshots"].is_a?(Array) ? h["snapshots"] : [])
+                  .select { |item| item.is_a?(Hash) }
+                  .map { |item| DatasetSnapshotSummary.from_h(item) }
       new(
-        count: h["count"] || datasets.length,
-        active_datasets: datasets
+        active_version: ModelCast.str(h, "active_version") || "",
+        previous_version: ModelCast.str(h, "previous_version"),
+        snapshots: snapshots
       )
     end
   end
 
-  # Payload for submitting an IP geolocation or anonymity correction (`POST /v1/feedback`).
+  # Correction report for `POST /v1/feedback`.
   class FeedbackSubmissionInput
-    attr_reader :ip_or_cidr, :suggested_country_code, :suggested_region_name,
-                :suggested_city, :suggested_is_vpn, :notes, :contact_email
+    ROLES = %w[network_owner user researcher].freeze
+    ISSUE_TYPES = %w[
+      wrong_country
+      wrong_city
+      false_positive_vpn
+      false_positive_hosting
+      false_positive_tor
+      virtual_location_mismatch
+      other
+    ].freeze
 
-    def initialize(
-      ip_or_cidr:,
-      suggested_country_code: nil,
-      suggested_region_name: nil,
-      suggested_city: nil,
-      suggested_is_vpn: nil,
-      notes: nil,
-      contact_email: nil
-    )
-      @ip_or_cidr = ip_or_cidr.to_s.freeze
-      @suggested_country_code = suggested_country_code&.to_s&.freeze
-      @suggested_region_name = suggested_region_name&.to_s&.freeze
-      @suggested_city = suggested_city&.to_s&.freeze
-      @suggested_is_vpn = suggested_is_vpn.nil? ? nil : !!suggested_is_vpn
-      @notes = notes&.to_s&.freeze
+    attr_reader :prefix_or_ip, :role, :issue_type, :requested_correction,
+                :evidence_url, :contact_consent, :contact_email
+
+    # @param prefix_or_ip [String] target IP address or CIDR prefix
+    # @param role [String] one of {ROLES}
+    # @param issue_type [String] one of {ISSUE_TYPES}
+    # @param requested_correction [Hash] requested corrected attributes, e.g. `{ "country_code" => "DE" }`
+    # @param evidence_url [String, nil] public URL to geofeed / RDAP / traceroute evidence
+    def initialize(prefix_or_ip:, role:, issue_type:, requested_correction: {}, evidence_url: nil,
+                   contact_consent: false, contact_email: nil)
+      @prefix_or_ip = prefix_or_ip.to_s.freeze
+      @role = role.to_s.freeze
+      @issue_type = issue_type.to_s.freeze
+      @requested_correction = (requested_correction || {}).each_with_object({}) { |(k, v), acc| acc[k.to_s] = v }.freeze
+      @evidence_url = evidence_url&.to_s&.freeze
+      @contact_consent = contact_consent ? true : false
       @contact_email = contact_email&.to_s&.freeze
       freeze
     end
 
     def to_h
-      payload = { "ip_or_cidr" => @ip_or_cidr }
-      payload["suggested_country_code"] = @suggested_country_code unless @suggested_country_code.nil?
-      payload["suggested_region_name"] = @suggested_region_name unless @suggested_region_name.nil?
-      payload["suggested_city"] = @suggested_city unless @suggested_city.nil?
-      payload["suggested_is_vpn"] = @suggested_is_vpn unless @suggested_is_vpn.nil?
-      payload["notes"] = @notes unless @notes.nil?
+      payload = {
+        "prefix_or_ip" => @prefix_or_ip,
+        "role" => @role,
+        "issue_type" => @issue_type,
+        "requested_correction" => @requested_correction,
+        "contact_consent" => @contact_consent
+      }
+      payload["evidence_url"] = @evidence_url unless @evidence_url.nil?
       payload["contact_email"] = @contact_email unless @contact_email.nil?
       payload
     end
   end
 
-  # Feedback submission acknowledgment returned by `POST /v1/feedback`.
+  # Feedback acknowledgment returned by `POST /v1/feedback`.
   class FeedbackSubmissionResponse
-    attr_reader :id, :ip_or_cidr, :status, :created_at
+    attr_reader :id, :prefix_or_ip, :role, :issue_type, :requested_correction,
+                :evidence_url, :contact_consent, :contact_email, :status, :created_at
 
-    def initialize(id:, ip_or_cidr:, status:, created_at:)
+    def initialize(id:, status:, created_at:, prefix_or_ip: "", role: "", issue_type: "",
+                   requested_correction: {}, evidence_url: nil, contact_consent: nil, contact_email: nil)
       @id = id.to_s.freeze
-      @ip_or_cidr = ip_or_cidr.to_s.freeze
+      @prefix_or_ip = prefix_or_ip.to_s.freeze
+      @role = role.to_s.freeze
+      @issue_type = issue_type.to_s.freeze
+      @requested_correction = requested_correction.freeze
+      @evidence_url = evidence_url
+      @contact_consent = contact_consent
+      @contact_email = contact_email
       @status = status.to_s.freeze
       @created_at = created_at.to_s.freeze
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        id: h["id"] || "",
-        ip_or_cidr: h["ip_or_cidr"] || "",
-        status: h["status"] || "",
-        created_at: h["created_at"] || ""
+        id: ModelCast.str(h, "id") || "",
+        prefix_or_ip: ModelCast.str(h, "prefix_or_ip") || "",
+        role: ModelCast.str(h, "role") || "",
+        issue_type: ModelCast.str(h, "issue_type") || "",
+        requested_correction: ModelCast.obj(h, "requested_correction") || {},
+        evidence_url: ModelCast.str(h, "evidence_url"),
+        contact_consent: ModelCast.bool(h, "contact_consent"),
+        contact_email: ModelCast.str(h, "contact_email"),
+        status: ModelCast.str(h, "status") || "",
+        # The API returns camelCase `createdAt`; accept snake_case too.
+        created_at: ModelCast.str(h, "createdAt") || ModelCast.str(h, "created_at") || ""
       )
     end
   end
 
-  # Service health status returned by `GET /v1/status`.
-  class ServiceStatusResponse
-    attr_reader :status, :service, :version, :uptime_seconds, :timestamp
+  # Serving and previous dataset versions reported by `GET /v1/status`.
+  class ServiceSnapshotInfo
+    attr_reader :current_version, :previous_version
 
-    def initialize(status:, service:, version:, uptime_seconds:, timestamp:)
-      @status = status.to_s.freeze
-      @service = service.to_s.freeze
-      @version = version.to_s.freeze
-      @uptime_seconds = uptime_seconds.to_f
-      @timestamp = timestamp.to_s.freeze
+    def initialize(current_version: nil, previous_version: nil)
+      @current_version = current_version
+      @previous_version = previous_version
       freeze
     end
 
     def self.from_h(raw)
-      h = raw.is_a?(Hash) ? raw : {}
+      h = ModelCast.as_hash(raw)
       new(
-        status: h["status"] || "",
-        service: h["service"] || "",
-        version: h["version"] || "",
-        uptime_seconds: h["uptime_seconds"] || 0.0,
-        timestamp: h["timestamp"] || ""
+        current_version: ModelCast.str(h, "currentVersion"),
+        previous_version: ModelCast.str(h, "previousVersion")
       )
     end
   end
 
-  # Rate-limit and quota metadata extracted from `x-ratelimit-*` HTTP response headers.
-  class RateLimitMetadata
-    attr_reader :limit, :remaining, :reset_epoch_seconds, :credits_remaining, :plan_tier
+  # Service health returned by `GET /v1/status`.
+  class ServiceStatusResponse
+    attr_reader :status, :snapshot
 
-    def initialize(
-      limit: nil,
-      remaining: nil,
-      reset_epoch_seconds: nil,
-      credits_remaining: nil,
-      plan_tier: nil
-    )
+    def initialize(status:, snapshot: nil)
+      @status = status.to_s.freeze
+      @snapshot = snapshot
+      freeze
+    end
+
+    # Dataset version currently served (the `dataset_version` lookups return).
+    def current_version
+      @snapshot&.current_version
+    end
+
+    def previous_version
+      @snapshot&.previous_version
+    end
+
+    def self.from_h(raw)
+      h = ModelCast.as_hash(raw)
+      snapshot = ModelCast.obj(h, "snapshot")
+      new(
+        status: ModelCast.str(h, "status") || "",
+        snapshot: snapshot ? ServiceSnapshotInfo.from_h(snapshot) : nil
+      )
+    end
+  end
+
+  # Rate-limit metadata from the `X-RateLimit-*` response headers. Limits apply per user, not per key.
+  class RateLimitMetadata
+    # limit: requests allowed per window; remaining: left in this window;
+    # reset_after_seconds: seconds until the window resets; scope: e.g. "user".
+    attr_reader :limit, :remaining, :reset_after_seconds, :scope
+
+    # `reset_epoch_seconds:` is accepted as a deprecated 1.0 alias of `reset_after_seconds:`.
+    def initialize(limit: nil, remaining: nil, reset_after_seconds: nil, scope: nil,
+                   reset_epoch_seconds: nil, credits_remaining: nil, plan_tier: nil)
+      reset = reset_after_seconds.nil? ? reset_epoch_seconds : reset_after_seconds
       @limit = limit.nil? ? nil : limit.to_i
       @remaining = remaining.nil? ? nil : remaining.to_i
-      @reset_epoch_seconds = reset_epoch_seconds.nil? ? nil : reset_epoch_seconds.to_i
-      @credits_remaining = credits_remaining.nil? ? nil : credits_remaining.to_i
-      @plan_tier = plan_tier&.to_s&.freeze
+      @reset_after_seconds = reset.nil? ? nil : reset.to_i
+      @scope = scope&.to_s&.freeze
       freeze
+    end
+
+    # @deprecated since 1.1.0. Misnamed in 1.0: the API sends seconds until the window
+    #   resets, not an epoch timestamp. Returns the same value as {#reset_after_seconds}.
+    def reset_epoch_seconds
+      @reset_after_seconds
+    end
+
+    # @deprecated since 1.1.0. The API never sends a credits header; always nil.
+    def credits_remaining
+      nil
+    end
+
+    # @deprecated since 1.1.0. The API never sends a tier header; always nil.
+    def plan_tier
+      nil
     end
   end
 

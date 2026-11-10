@@ -18,6 +18,6 @@ Gem::Specification.new do |spec|
   spec.metadata["source_code_uri"]   = "https://github.com/ipscope-io/ipscope-ruby"
   spec.metadata["documentation_uri"] = "https://ipscope.io/docs/sdks/ruby"
 
-  spec.files         = Dir["lib/**/*.rb", "README.md", "LICENSE"]
+  spec.files         = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md", "LICENSE"]
   spec.require_paths = ["lib"]
 end
